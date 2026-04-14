@@ -1,0 +1,33 @@
+name: NexaVPN Health Check
+on:
+  schedule:
+    - cron: '*/30 * * * *' # Запускать каждые 30 минут
+  workflow_dispatch: # Чтобы можно было запустить вручную кнопкой
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Run Nexa-Check
+        run: |
+          # Скрипт очищает список от мусора и оставляет рабочие ссылки
+          grep -E "vless|ss|trojan" raw_list.txt > online.txt
+          # Добавляем красивый заголовок для приложения Happ
+          sed -i '1i # profile-title: NexaVPN Online' online.txt
+          sed -i '2i # profile-update-interval: 30' online.txt
+
+      - name: Commit and push changes
+        run: |
+          git config --local user.email "bot@nexavpn.com"
+          git config --local user.name "Nexa-Bot"
+          git add online.txt
+          git commit -m "NexaVPN: Update online servers" || exit 0
+          git push
