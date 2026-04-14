@@ -1,33 +1,42 @@
 name: NexaVPN Health Check
+
 on:
+  workflow_dispatch:
   schedule:
-    - cron: '*/30 * * * *' # Запускать каждые 30 минут
-  workflow_dispatch: # Чтобы можно было запустить вручную кнопкой
+    - cron: '0 */6 * * *' # Будет обновляться само каждые 6 часов
 
 jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.9'
+          python-version: '3.x'
 
-      - name: Run Nexa-Check
+      - name: Install dependencies
         run: |
-          # Скрипт очищает список от мусора и оставляет рабочие ссылки
-          grep -E "vless|ss|trojan" raw_list.txt > online.txt
-          # Добавляем красивый заголовок для приложения Happ
-          sed -i '1i # profile-title: NexaVPN Online' online.txt
-          sed -i '2i # profile-update-interval: 30' online.txt
+          python -m pip install --upgrade pip
+          pip install requests
 
-      - name: Commit and push changes
+      - name: Fetch external configs
         run: |
-          git config --local user.email "bot@nexavpn.com"
-          git config --local user.name "Nexa-Bot"
+          # Скачиваем чужие конфиги и добавляем их в наш список
+          curl -s https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/BLACK_VLESS_RUS_mobile.txt >> raw_list.txt
+          curl -s https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/WHITE-CIDR-RU-all.txt >> raw_list.txt
+          echo "External configs merged."
+
+      - name: Run checker
+        run: |
+          # Здесь запускается твой основной скрипт (убедись, что main.py есть в корне)
+          python main.py 
+
+      - name: Commit and Push
+        run: |
+          git config --global user.name "Nexa-Bot"
+          git config --global user.email "bot@nexa.vpn"
           git add online.txt
-          git commit -m "NexaVPN: Update online servers" || exit 0
+          git commit -m "NexaVPN: Update online servers from sources" || exit 0
           git push
