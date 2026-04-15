@@ -1,58 +1,97 @@
-import os
-from aiogram import Bot, Dispatcher, types, executor
+import logging
+import asyncio
+from aiohttp import web
+from aiogram import Bot, Dispatcher, types, F
+from aiogram.filters import Command
+from aiogram.types import (LabeledPrice, PreCheckoutQuery, ContentType, 
+                           InlineKeyboardButton, InlineKeyboardMarkup, 
+                           ReplyKeyboardMarkup, KeyboardButton)
 
-# Токены из Railway
-TOKEN = os.getenv("BOT_TOKEN")
-PAY_TOKEN = os.getenv("PAYMENT_TOKEN")
+# --- КОНФИГУРАЦИЯ ---
+BOT_TOKEN = "ВАШ_ТОКЕН_БОТА"
+PAYMENT_TOKEN = "ВАШ_ПЛАТЕЖНЫЙ_ТОКЕН"
+SUPPORT_USER = "vash_nik_v_tg"
+VPN_LINK = "https://raw.githubusercontent.com/ileo-g/NexaVPN-Base/main/online.txt"
 
-bot = Bot(token=TOKEN)
-dp = Dispatcher(bot)
+bot = Bot(token=BOT_TOKEN)
+dp = Dispatcher()
 
-# Кнопки тарифов
-def tariffs_kb():
-    kb = types.InlineKeyboardMarkup(row_width=1)
-    kb.add(
-        types.InlineKeyboardButton("📱 1 устройство — 159₽", callback_data="buy_159"),
-        types.InlineKeyboardButton("📱 2 устройства — 209₽", callback_data="buy_209"),
-        types.InlineKeyboardButton("⬅️ Назад", callback_data="start")
+# --- ВЕБ-СЕРВЕР ДЛЯ HUGGING FACE ---
+async def handle(request):
+    return web.Response(text="Бот NexaVPN запущен и работает!")
+
+async def start_webserver():
+    app = web.Application()
+    app.router.add_get("/", handle)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    # Порт 7860 — стандарт для Hugging Face Spaces
+    site = web.TCPSite(runner, "0.0.0.0", 7860)
+    await site.start()
+
+# --- КЛАВИАТУРЫ ---
+def main_menu():
+    kb = [
+        [KeyboardButton(text="⚡ Купить подписку")],
+        [KeyboardButton(text="📖 Инструкция (Happ)"), KeyboardButton(text="🆘 Поддержка")]
+    ]
+    return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
+
+def pay_inline():
+    btn = [[InlineKeyboardButton(text="Оплатить 300₽", callback_data="start_pay")]]
+    return InlineKeyboardMarkup(inline_keyboard=btn)
+
+# --- ХЕНДЛЕРЫ ---
+@dp.message(Command("start"))
+async def cmd_start(message: types.Message):
+    await message.answer("👋 Добро пожаловать в NexaVPN! Используйте меню ниже:", reply_markup=main_menu())
+
+@dp.message(F.text == "🆘 Поддержка")
+async def support_info(message: types.Message):
+    await message.answer(f"По вопросам оплаты пишите: @{SUPPORT_USER}")
+
+@dp.message(F.text == "📖 Инструкция (Happ)")
+async def manual_happ(message: types.Message):
+    text = (
+        "🍏 **Инструкция для Happ:**\n\n"
+        "1. Скопируйте ссылку после оплаты.\n"
+        "2. В приложении Happ нажмите **«+»**.\n"
+        "3. Выберите **«Add from Clipboard»**.\n"
+        "4. Нажмите на кнопку подключения."
     )
-    return kb
+    await message.answer(text, parse_mode="Markdown")
 
-@dp.callback_query_handler(lambda c: c.data == 'tariffs')
-async def show_tariffs(call: types.CallbackQuery):
-    await call.message.edit_text("💎 **Выберите тариф:**", reply_markup=tariffs_kb(), parse_mode="Markdown")
+@dp.message(F.text == "⚡ Купить подписку")
+async def buy_process(message: types.Message):
+    await message.answer("Стоимость: 300 руб/мес.", reply_markup=pay_inline())
 
-# ОТПРАВКА СЧЕТА НА ОПЛАТУ
-@dp.callback_query_handler(lambda c: c.data.startswith('buy_'))
-async def send_invoice(call: types.CallbackQuery):
-    amount = int(call.data.split('_')[1])
-    
+@dp.callback_query(F.data == "start_pay")
+async def send_invoice(callback: types.CallbackQuery):
     await bot.send_invoice(
-        chat_id=call.from_user.id,
-        title=f"Подписка NexaVPN",
-        description=f"Доступ на выбранное кол-во устройств",
-        payload="vpn_subscription",
-        provider_token=PAY_TOKEN,
+        chat_id=callback.from_user.id,
+        title="NexaVPN: 30 дней",
+        description="Подписка для Happ Utility",
+        payload="vpn_pay",
+        provider_token=PAYMENT_TOKEN,
         currency="RUB",
-        prices=[types.LabeledPrice(label="VPN Подписка", amount=amount * 100)], # Сумма в копейках
-        start_parameter="nexa-vpn-pay"
+        prices=[LabeledPrice(label="Подписка", amount=30000)]
     )
 
-# ПРОВЕРКА ПЛАТЕЖА (Перед финальной оплатой)
-@dp.shipping_query_handler(lambda query: True)
-async def shipping(shipping_query: types.ShippingQuery):
-    await bot.answer_shipping_query(shipping_query.id, ok=True)
+@dp.pre_checkout_query()
+async def pre_checkout(query: PreCheckoutQuery):
+    await bot.answer_pre_checkout_query(query.id, ok=True)
 
-@dp.pre_checkout_query_handler(lambda query: True)
-async def checkout(pre_checkout_query: types.PreCheckoutQuery):
-    await bot.answer_pre_checkout_query(pre_checkout_query.id, ok=True)
+@dp.message(F.content_type == ContentType.SUCCESSFUL_PAYMENT)
+async def success_payment(message: types.Message):
+    await message.answer(f"✅ Оплата принята! Ваша ссылка:\n`{VPN_LINK}`", parse_mode="Markdown")
 
-# ЧТО ДЕЛАТЬ ПОСЛЕ УСПЕШНОЙ ОПЛАТЫ
-@dp.message_handler(content_types=types.ContentType.SUCCESSFUL_PAYMENT)
-async def got_payment(message: types.Message):
-    # Здесь бот подтверждает платеж
-    await message.answer(
-        "✅ **Оплата прошла успешно!**\n\n"
-        "Ваша подписка активирована. Вот ваша уникальная ссылка:\n"
-        "`vless://unique_link_here...`" # Сюда потом прикрутим генерацию ссылок
-    )
+# --- ЗАПУСК ---
+async def main():
+    # Запускаем веб-сервер, чтобы HF не "усыплял" бота
+    asyncio.create_task(start_webserver())
+    # Запускаем бота
+    await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+    asyncio.run(main())
